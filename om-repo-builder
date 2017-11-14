@@ -1,0 +1,94 @@
+#!/usr/bin/sh
+# Program: Dell OpenManage Repository Builder
+# Author: Matty < matty91 at gmail dot com >
+# Current Version: 1.0
+# Date: 07-24-2017
+# License:
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 2 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+#  GNU General Public License for more details.
+
+ADMINS="root"
+DELL_OM_DIR="/var/www/repos/dell-openmanage"
+RHEL_RELEASES="6 7"
+UPGRADING="NO"
+VERSION=""
+
+# DSU_VERSION format: DSU_17.06.00
+if [ $# -eq 1 ]; then
+    DSU_VERSION=$1
+else
+    VERSION=`wget -qO- https://linux.dell.com/repo/hardware/latest/ |/usr/bin/awk -F '[) ]+' '/Version/{print $10}'`
+    if [ $? -ne 0 ]; then
+       echo "ERROR: Unable to retrieve the OM repo from Dell"
+       exit 1
+    fi
+
+    if [ "${VERSION}" != "" ]; then
+        DSU_VERSION="DSU_${VERSION}"
+    else
+        echo "ERROR: Unable to retrieve a version number from Dell"
+        exit 1
+    fi
+fi
+
+if [ ! -d ${DELL_OM_DIR}/${DSU_VERSION} ]; then
+     UPGRADING="YES"
+else
+     echo "INFO: DSU version ${DSU_VERSION} is already installed"
+     exit 0
+fi
+
+echo "Sucking down OpenManage release ${DSU_VERSION} from Dell"
+echo "The new version will be installed in ${DELL_OM_DIR}"
+
+if [ ! -d ${DELL_OM_DIR} ]; then
+    echo "Creating a Dell OpenManage directory named ${DELL_OM_DIR}"
+    mkdir ${DELL_OM_DIR}
+fi
+
+for release in ${RHEL_RELEASES}; do
+    echo "Retrieving OM for Enterprise Linux ${release}"
+    DELL_OM_URL="https://linux.dell.com/repo/hardware/${DSU_VERSION}/os_dependent/RHEL${release}_64/"
+    wget -q --progress=dot --no-parent -P ${DELL_OM_DIR} -r -l2 -nH --cut-dirs=2 ${DELL_OM_URL}
+
+    if [ $? -ne 0 ]; then
+       echo "ERROR: Unable to retrieve the OM repo from Dell"
+       exit 1
+    fi
+
+    SRC_DIR="${DELL_OM_DIR}/${DSU_VERSION}/os_dependent/RHEL${release}_64"
+    DEST_DIR="${DELL_OM_DIR}/${DSU_VERSION}/os_dependent"
+
+    if [ -d ${SRC_DIR} ] && [ ! -d ${DEST_DIR}/${release} ]; then
+        # Rename the directories to overcome a limitation with the
+        # the yum $releasever variable inside a URL string.
+        echo "Renaming OM directory ${SRC_DIR} to ${DEST_DIR}"
+        mv ${SRC_DIR} ${DEST_DIR}/${release}
+
+        # Creating a symbolic link for OEL since $releasver is unique
+        ln -s ${DEST_DIR}/${release} ${DEST_DIR}/${release}Server
+    else
+        echo "ERROR: Cannot rename directory"
+        echo "ERROR: Check to make sure that ${SRC_DIR} exists"
+        echo "ERROR: and ${DEST_DIR}/{release} does not."
+    fi
+done
+
+if [ "${UPGRADING}" == "YES" ]; then
+    echo "     A new version of Dell OpenManage is available on ${HOSTNAME}
+     New Version number: ${DSU_VERSION}
+     To activate this version please point the latest link to the new
+     version once it has been thoroughly vetted on non-production hardware.
+
+     Example:
+      $ rm -f ${DELL_OM_DIR}/omlatest
+      $ ln -s ${DELL_OM_DIR}/${DSU_VERSION} ${DELL_OM_DIR}/omlatest" | mail -s "A new version of the Dell Openmanage Linux repo is available on ${HOSTNAME}" ${ADMINS}
+fi
+(domain-check) 
