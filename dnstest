@@ -1,0 +1,135 @@
+#!/bin/sh
+
+PATH=/bin:/usr/bin:/usr/local/bin:/sbin:/usr/sbin
+export PATH
+
+#
+# Program: DNS Validation Test <dnstest>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.0
+#
+# Revision History:
+#
+# Version 1.0
+#     Original release
+#
+# Last Updated: 09-12-2016
+#
+# Purpose:
+#   Pings one or more DNS servers to check DNS resolution and query latency.
+#
+# License:
+#   This program is free software; you can redistribute it and/or modify it
+#   under the terms of the GNU General Public License as published by the
+#   Free Software Foundation; either version 2, or (at your option) any
+#   later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software
+#   Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+#
+# Example:
+# $ dnstest -r prefetch.net -i 209.197.94.145 -r a -c 1 192.168.1.1 192.168.1.2
+# Checking the health of DNS server 192.168.1.1:
+#  *** Got the correct result for prefetch.net
+#  *** prefetch.net resolved to 209.197.94.145
+#  *** DNS latency resolving prefetch.net on 192.168.86.1 is 1 msec
+# 
+# Checking the health of DNS server 192.168.1.2:
+#  *** Got the correct result for prefetch.net
+#  *** prefetch.net resolved to 209.197.94.145
+#  *** DNS latency resolving prefetch.net on 192.168.86.2 is 1 msec
+# 
+
+# DNS servers to contact (passed on command line)
+DNSSERVERS="127.0.0.1"
+
+# Run the lookup and latency tests this number of times to look for errors (-c iterations)
+ITERATIONS=1
+
+# Resource record to query (-r record_name)
+RRECORD_NAME="prefetch.net"
+
+# IP resource record should resolve to (-i record_ip)
+RRECORD_IP="209.197.94.145"
+
+# Resource record type to query (-r record_type)
+RRECORD_TYPE="a"
+
+# Amount of time to sleep between tests (-t X)
+SLEEP_INTERVAL=0
+
+latency() {
+    dig @${1} ${2} ${RRECORD_TYPE} | awk '{ if ($0 ~/Query time/) print $4,$5}'
+}
+
+lookup() {
+    dig +short @${1} $2 ${RRECORD_TYPE}
+}
+
+dnstest() {
+    count=0
+    while [ ${count} -lt ${ITERATIONS} ]; do
+        # DNS server to check
+        server=${1}
+
+        echo "Checking the health of DNS server ${server}:"
+        ip=$(lookup ${server} ${RRECORD_NAME})
+        if [ "${ip}" = "${RRECORD_IP}" ]; then
+            echo " *** Got the correct result for ${RRECORD_NAME}"
+            echo " *** ${RRECORD_NAME} resolved to ${ip}"
+        else
+            echo -e "\033[33;7m*** Got a negative result for ${RRECORD_NAME}\033[0m"
+            echo -e " *** ${RRECORD_NAME} resolved to ${ip}"
+            echo -e " *** ${RRECORD_NAME} should resolve to ${RRECORD_IP}"
+        fi
+        dnslatency=$(latency ${server} ${RRECORD_NAME})
+        echo " *** DNS latency resolving ${RRECORD_NAME} on ${server} is ${dnslatency}"
+        echo ""
+        count=$((count+1))
+        sleep ${SLEEP_INTERVAL}
+    done
+}
+
+parse() {
+    while getopts c:d:i:r:s:t: option
+    do
+        case "${option}"
+        in
+            d) RRECORD_NAME=${OPTARG};;
+            i) RRECORD_IP=${OPTARG};;
+            c) ITERATIONS=${OPTARG};;
+            r) DNSRECORD=${OPTARG};;
+            t) SLEEP_INTERVAL=${OPTARG};;
+            \?) usage
+                exit 1;;
+            esac
+    done
+}
+
+usage() {
+
+    echo "Usage: $0 [-d DNS record to query] [-i IP DNS record should resolve to] "
+    echo "          [-c number of times to query each server] [ -r DNS resource record type ]"
+    echo "          [-t number of seconds to sleep between queries] server1 server2 ..."
+}
+
+# Parse the command line arguments and shift arguments to get the list of servers to query.
+parse "$@"
+shift "$((OPTIND-1))"
+
+if [ $# -eq 0 ];then
+    usage
+    exit 1
+fi
+
+for dnsserver in ${@}; do
+    dnstest ${dnsserver}
+done
