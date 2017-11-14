@@ -1,0 +1,90 @@
+#!/bin/bash 
+#
+# Program: E-mail fault manager errors <fmadmnotifier.sh>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.1
+#
+# Revision History:
+#
+#  Version 1.1
+#    Avoid the use of temporary files -- Michael Shon
+#
+#  Version 1.0
+#    Initial Release
+#
+# Last Updated: 08-18-2006
+#
+# Purpose:
+#   Fmadm.sh queries the fault manager to see if errors have been 
+#   generated. If an error is detected, the script will email the
+#   admininstrator defined in the ADMIN vairable with the error 
+#   details.
+#
+# License:
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Installation:
+#   Copy the shell script to a suitable location
+#
+# Usage:
+#   To check for events once per hour, add a cron job similar to the following:
+#
+#   $ crontab -l | grep fmadmnotifier.sh
+#   0 * * * * /etc/scripts/fmadmnotifier.sh
+#
+
+PATH=/usr/bin:/sbin:/usr/sbin:/usr/sfw/bin
+
+# Who to E-mail with new updates
+ADMIN="root"
+
+# Location of binaries
+AWK=$(which awk)
+FMADM=$(which fmadm)
+HOSTNAME=$(which hostname)
+MAIL=$(which mailx)
+MKTEMP=$(which mktemp)
+
+# Check to make sure the mail binary exists
+if [ ! -f ${MAIL} ]
+then
+        echo "Cannot find ${MAIL}"
+        exit 1
+fi
+
+# Check to make sure the fmadm utility exists
+if [ ! -f ${FMADM} ]
+then
+        echo "Cannot find ${FMADM}"
+        exit 1
+fi
+
+# Verify that mktemp exists
+if [ ! -f ${MKTEMP} ]
+then
+        echo "Cannot find ${MKTEMP}"
+        exit 1
+fi
+
+# Run fmadm faulty to check for hardware errors
+FMADMOUTPUT=$(${FMADM} faulty | ${AWK} '$0 !~ /STATE/ && $0 !~ /^----/ { print $0 }')
+
+if [ -n "${FMADMOUTPUT}" ]
+then
+ (
+   echo "The fault manager detected a problem with the system hardware."
+   echo "The fmadm and fmdump utilities can be run to retrieve additional"
+   echo "details on the faults and recommended next course of action. "
+
+   echo ""
+   echo "fmadm faulty output:"
+   echo ""
+
+   ${FMADM} faulty
+   echo ""
+ ) | ${MAIL} -s "Hardware fault on $($HOSTNAME)" ${ADMIN}
+fi
