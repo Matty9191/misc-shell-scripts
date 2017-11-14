@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# Program: Bad Disk locator <baddisk.sh>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.0
+#
+# Revision History:
+#
+# Version 1.0
+#     Original release
+#
+# Last Updated: 09-25-2005
+#
+# Notes: 
+#  This script assumes that a S.M.A.R.T self test similar to the following 
+#  was run prior to execution:
+#
+#  $ smartctl -t offline /dev/rdsk/c0t0d0s0
+#
+#  This script is also specific to Solaris, and will need to be adjusted to 
+#  work on other platforms.
+#
+
+ADMIN="root"
+MAIL="/usr/bin/mailx"
+SMARTCTL="/usr/local/smartmontools/sbin/smartctl"
+
+for i in `echo quit | format 2>/dev/null | nawk '$0 ~/[0-9]+\.\ c[0-9]+t[0-9]+d[0-9]+.*/ {print $2}'`;do
+      ${SMARTCTL}  -q silent -l selftest /dev/rdsk/${i}s2
+
+      if [ $? -eq 1 ]; then
+            logger -p daemon.notice "A S.M.A.R.T self-test failure was detected on $i"
+            echo " "A S.M.A.R.T self-test failure was detected on $i"" | ${MAIL} -s "SMART_FAILURE: Disk drive ${i}s2" ${ADMIN}
+      fi
+done
