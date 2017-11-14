@@ -1,0 +1,123 @@
+#!/bin/sh 
+#
+# Program: E-mail available yum updates <yumnotifier>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.2
+#
+# Revision History:
+#
+#  Version 1.2
+#    - Removed ! from if statement - John Beaman
+#    - Changed comments to reference "yumnotifier", not
+#      "yumupdate" -- John Beaman
+#
+#  Version 1.1
+#    - Switched test statement to use "-s" - Luca Rozza
+#
+#  Version 1.0
+#    Initial Release
+#
+# Last Updated: 10-24-2007
+#
+# Purpose:
+#   yumnotifier checks for updated software package, and E-mails the
+#   address defined in the ${ADMIN} variable if updates are available.
+#
+# License:
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# Installation:
+#   Copy the shell script to a suitable location
+#
+# Usage:
+#   To check for new updates each day at midnight, a cron job similar to the
+#   following can be used:
+#
+#   $ crontab -l | grep yumnotifier
+#   0 0 * * * /etc/scripts/yumnotifier
+#
+# Sample output
+#   An E-mail similar to the following is sent if updates are available:
+#
+#   From root@localhost.localdomain  Sat Jul 15 19:24:59 2006
+#   Date: Sat, 15 Jul 2006 19:24:59 -0400
+#   From: root <root@localhost.localdomain>
+#   To: matty@localhost.localdomain
+#   Subject: Updates available for biscuit
+#  
+#   ==== The following updates are available for biscuit ===
+#  
+#   comps.i386                               2:4.3CENTOS-0.20060314 base            
+#   gtk2.i386                                2.4.13-18              base            
+#   kernel.i686                              2.6.9-34.0.2.EL        update          
+#   libtiff.i386                             3.6.1-10               update          
+#   mysql.i386                               4.1.20-1.RHEL4.1       update          
+#   mysql-devel.i386                         4.1.20-1.RHEL4.1       update          
+#   newt.i386                                0.51.6-7.rhel4         base            
+#   php.i386                                 4.3.9-3.15             update          
+#   php-ldap.i386                            4.3.9-3.15             update          
+#   php-pear.i386                            4.3.9-3.15             update          
+#   postgresql-libs.i386                     7.4.13-2.RHEL4.1       update          
+#   rpmdb-CentOS.i386                        2:4.3-0.20060314       base            
+#   sendmail.i386                            8.13.1-3.RHEL4.5       update          
+#   sendmail-cf.i386                         8.13.1-3.RHEL4.5       update          
+#   spamassassin.i386                        3.0.6-1.el4            update          
+#   vixie-cron.i386                          4:4.1-44.EL4           update          
+#   xorg-x11-Mesa-libGL.i386                 6.8.2-1.EL.13.25.1     update          
+#   xorg-x11-font-utils.i386                 6.8.2-1.EL.13.25.1     update          
+#   xorg-x11-libs.i386                       6.8.2-1.EL.13.25.1     update          
+#   xorg-x11-xauth.i386                      6.8.2-1.EL.13.25.1     update          
+#   xorg-x11-xfs.i386                        6.8.2-1.EL.13.25.1     update        
+
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+export PATH
+
+# Locations of binaries
+GREP="/bin/grep"
+HOST=`hostname`
+MAIL="/bin/mail"
+MKTEMP="/bin/mktemp"
+YUM="/usr/bin/yum"
+
+# Who to E-mail with new updates
+ADMIN="matty"
+
+if [ ! -f ${YUM} ];then
+        echo "Cannot find ${YUM}"
+        exit 1
+fi
+
+if [ ! -f ${MKTEMP} ];then
+        echo "Cannot find ${MKTEMP}"
+        exit 1
+fi
+
+if [ ! -f ${MAIL} ];then
+        echo "Cannot find ${MAIL}"
+        exit 1
+fi
+
+if [ ! -f ${GREP} ];then
+        echo "Cannot find ${GREP}"
+        exit 1
+fi
+
+# Dump the yum results to a safe working file
+WORK=`${MKTEMP} /tmp/yum.results.XXXXXX`
+
+${YUM} -e0 -d0 check-update > ${WORK}
+
+# If there are updates available, E-mail them
+if [ -s ${WORK} ];then
+        REPORT=`${MKTEMP} /tmp/yum.report.XXXXXX`
+        echo "==== The following updates are available for ${HOST} ===" > ${REPORT}
+        cat ${WORK} >> ${REPORT}
+        cat ${REPORT} | ${MAIL} -s "Updates available for ${HOST}" ${ADMIN}
+fi
+
+# Cleanup temporary files
+rm ${REPORT} ${WORK}
