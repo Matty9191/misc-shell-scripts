@@ -1,0 +1,110 @@
+#!/bin/sh 
+#
+# Program: SSL Site Check <ssl-site-check>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.1
+#
+# Revision History:
+#
+# Version 1.1
+#     Make better use of global binary definitions -- Philipp Ottlinger
+#
+# Version 1.0
+#     Original release
+#
+# Last Updated: 03-23-2006
+#
+# Purpose: 
+#  Connects to ${HOST} on ${PORT} and issues a GET / to check if
+#  a secure web server is responding. If the web server is hung, a
+#  message will be logged with the logadm utility, and an e-mail
+#  will be sent to the specified user. The host and port options
+#  are passed as options to the script.
+#
+# Requirements:
+#   Requires openssl
+# 
+# Installation: 
+#   Copy the shell script to a suitable location
+#
+# Example:
+#   $ ssl-service-check -s mail.prefetch.net -p 443
+# 
+
+PATH=/bin:/usr/bin:/usr/local/ssl/bin:/usr/sfw/bin ; export PATH
+
+#  Where to send E-mail with results ( cmdline: -e )
+ADMIN="root"
+LOGGER="/usr/bin/logger"
+MAIL="/usr/bin/mail"
+OPENSSL="/usr/sfw/bin/openssl"
+GREP="/usr/bin/grep"
+
+# Temporary file
+TMP="$HOME/connect.$$"
+umask 077 
+touch ${TMP}
+
+usage() {
+	echo "Usage: $0 [ -s server_name ] [ -p port ] [ -e email_address ]"
+	echo "   -e email_address  : Specifies who to send messages to when connection errors occur"
+	echo "   -p port           : Specifies the TCP port to connect to"
+	echo "   -s server_name    : Specifies the servername to connect to"
+}
+
+### Parse the options passed on the command line
+while getopts p:s:e: option
+do
+        case "${option}"
+        in
+                e) ADMIN=${OPTARG};;
+                p) PORT=${OPTARG};;
+                s) HOST=${OPTARG};;
+                \?) usage
+                    exit 1;;
+        esac
+done
+
+### Make sure a host and port were passed as arguments
+if [ "${HOST}" = "" ] || [ "${PORT}" = "" ];then
+	usage
+	exit 1
+fi
+
+### Check to see if the openssl binary exists
+if [ -f ${OPENSSL} ]; then
+        :
+else
+        echo "ERROR: The openssl binary does not exist in ${OPENSSL} ."
+        echo "  FIX: Please modify the \$OPENSSL variable in the program header."
+        exit 1
+fi
+
+${OPENSSL} s_client -quiet -connect ${HOST}:${PORT} > ${TMP} 2>&1 << EOF
+GET / HTTP/1.0
+
+
+EOF
+
+### Connect to the web server and issues an HTTP GET /. If the
+### the server provides a valid response header, the 'Server:'
+### attribute will be present in the header
+if ${GREP} "Server:" ${TMP} > /dev/null; then
+        :
+else
+	if [ -f ${LOGGER} ]
+	then
+                ${LOGGER} -p daemon.notice "Failed to connect to ${HOST} on Port ${PORT}"
+        fi
+
+        if [ -f ${MAIL} ]; then
+                echo "Failed to initiate SSL connection to ${HOST} on ${PORT}" \
+                | ${MAIL} -s "$0: Failed to connect to secure server \
+                on ${HOST}:${PORT}" ${ADMIN}
+        fi
+fi
+
+### Remove the temporary file
+rm -f ${TMP}
