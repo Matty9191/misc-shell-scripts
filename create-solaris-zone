@@ -1,0 +1,171 @@
+#!/bin/bash 
+#
+# Sample sysidcfg
+# system_locale=C
+# terminal=vt100
+# timezone=US/Eastern
+# network_interface=PRIMARY {
+#     hostname=mysql
+# }
+# root_password=thisismypassword
+# security_policy=NONE
+# name_service=DNS {
+#    domain_name=prefetch.net
+#    name_server=192.168.1.1
+#    search=prefetch.net
+# }
+#
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/sfw/bin
+export PATH
+
+usage() {
+	echo "Usage: $0 -z ZONENAME -p ZONEPATH -i IPADDRESS"
+        echo "          [-s SYSIDCFG] [ -x SITE.XML] [-h]"
+        echo "      -h           : print a help screen"
+        echo "      -i IPADDRESS : Network address to use"
+        echo "      -p ZONEPATH  : Directory to store the zone"
+        echo "      -s SYSIDCFG  : sysidcfg file to use"
+        echo "      -x SITE.XML  : site.xml file to use"
+        echo "      -z ZONENAME  : Name of the zone to create"
+}
+
+# Protect ourselves from interruptable events
+trap ""  2 3
+
+# Make sure we are root
+ROOTUID=`/usr/xpg4/bin/id -u`
+
+if [ ${ROOTUID} -ne 0 ]
+then
+        echo "You need to be root to run this program"
+        exit 1
+fi
+
+# Process the command line arguments
+while getopts hi:p:s:x:z: option
+do
+        case "${option}"
+        in
+                h) usage
+                   exit 1;;
+                i) IPADDRESS=${OPTARG};;
+                p) ZONEPATH=${OPTARG};;
+ 		s) SYSIDCFG=${OPTARG};;
+                x) SITEXML=${OPTARG};;
+                z) ZONENAME=${OPTARG};;
+                \?) usage
+                    exit 1;;
+        esac
+done
+
+# Verify that the ZONENAME is not NULL
+if [ -z "${ZONENAME}" ] 
+then
+        echo "ZONENAME cannot be null"
+        exit 1
+fi
+
+# Verify that ZONEPATH is not NULL
+if [ -z "${ZONEPATH}" ]
+then
+        echo "ZONEPATH cannot be null"
+        exit 1
+fi
+
+# Verify that the IPADDRESS is not NULL
+if [ -z "${IPADDRESS}" ]
+then
+        echo "IPADDRESS cannot be null"
+        exit 1
+fi
+
+# Verify that the ZONENAME contains legit characters
+if echo ${ZONENAME} | egrep "[^a-zA-Z0-9]" > /dev/null
+then
+        echo "Zones can only contain the letters a-z, A-Z and 0-9"
+        exit 1
+fi
+
+# Verify that the ZONENAME doesn't already exist
+zoneadm -z ${ZONENAME} list >/dev/null
+
+if [ $? -eq 0 ]
+then
+        echo "Zone ${ZONENAME} already exist"
+        exit 1
+fi
+
+
+# Get the interface
+INTERFACE=`/sbin/dladm show-link -p | awk '{ print $1; exit }'`
+
+if [ -z "${INTERFACE}" ]
+then
+        echo "Cannot find a suitable interface"
+        exit 1
+fi
+
+echo "Creating zone ${ZONENAME} with the following parameters:"
+echo "   ZONENAME: ${ZONENAME}"
+echo "   ZONEPATH: ${ZONEPATH}"
+echo "   IPADDRESS: ${IPADDRESS}"
+echo "   SYSIDCFG: ${SYSIDCFG}"
+echo "   SITE.XML: ${SITEXML}"
+echo ""
+
+# All is swell, create the zone
+/usr/sbin/zonecfg -z ${ZONENAME} << __EOF__
+create
+set zonepath=${ZONEPATH}
+set autoboot=true
+add net
+set physical=${INTERFACE}
+set address=${IPADDRESS}
+end
+commit
+exit
+__EOF__
+
+if [ $? -ne 0 ]
+then
+        echo "Problem creating the zone configuration"
+        exit 1
+fi
+
+# Install the zone
+/usr/sbin/zoneadm -z ${ZONENAME} install >/dev/null
+
+if [ $? -ne 0 ]
+then
+        echo "Problems installing zone"
+
+        if [ -d ${ZONEPATH} ]
+        then
+                rm -rf ${ZONEPATH}
+        fi
+
+        exit 1
+fi
+
+# Install a sysidcfg file to avoid prompts
+if [ -f ${SYSIDCFG} ]
+then 
+        echo "Copying ${SYSIDCFG} to the new zone"
+ 	cp ${SYSIDCFG} ${ZONEPATH}/root/etc/sysidcfg
+
+        echo "Removing the NFS prompt from the zone"
+        touch ${ZONEPATH}/root/etc/.NFS4inst_state.domain
+fi
+
+if [ -f ${SITEXML} ]
+then
+	echo "Copying ${SITEXML} to the new zone"
+	cp ${SITEXML} ${ZONEPATH}/root/var/svc/profile/site.xml
+fi
+
+# Boot the zone
+echo "Booting the new zone"
+/usr/sbin/zoneadm -z ${ZONENAME} boot
+
+echo "The zone ${ZONENAME} is now created"
