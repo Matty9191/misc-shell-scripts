@@ -1,0 +1,74 @@
+#!/bin/sh 
+
+# Inspired by Brendan Gregg's syscount
+# https://github.com/brendangregg/perf-tools/blob/master/syscount
+
+# Default action will take if a system call isn't allowed. Possible options:
+# https://github.com/docker/labs/tree/master/security/seccomp
+DOCKER_ACTION="SCMP_ACT_KILL"
+OPT_COMMAND=0
+OPT_DOCKER=0
+OPT_SYSTEMD=0
+OPT_LIST_SYSCALLS=0
+
+# Process all of the command line arguments
+while getopts "c:dls" opt; do
+    case $opt in
+        c) OPT_COMMAND=$OPTARG ;;
+        d) OPT_DOCKER=1 ;;
+        l) OPT_LIST_SYSCALLS=1 ;;
+        s) OPT_SYSTEMD=1 ;;
+        *) echo "Usage: $0 -c <COMMANDS> [-d] [-l] [-s]"
+           exit 1;;
+    esac
+done
+
+# Print the system calls in a columnar list
+if [ ${OPT_LIST_SYSCALLS} -eq 1 ]; then
+    echo "System calls captured by perf:"
+    perf stat -o /dev/stdout -e 'syscalls:sys_enter_*' ${OPT_COMMAND} | awk '
+         $1 && $2 ~ /syscalls:/ {
+         sub("syscalls:sys_enter_", ""); sub(":", "")
+         gsub(",", "")
+         print $2 }' | paste - - - - -
+fi
+
+# Print a line suitable to add to a systemd unit file
+if [ ${OPT_SYSTEMD} -eq 1 ]; then
+    perf stat -o /dev/stdout -e 'syscalls:sys_enter_*' ${OPT_COMMAND} | awk '
+         BEGIN { printf "SystemCallFilter=" }
+         $1 && $2 ~ /syscalls:/ {
+         sub("syscalls:sys_enter_", ""); sub(":", "")
+         gsub(",", "")
+         printf $2" " }'
+    echo ""
+fi
+
+#  Print a line suitable to add to the docker
+# --security-opt seccomp= runtime option
+if [ ${OPT_DOCKER} -eq 1 ]; then
+    SYSCALLS=`perf stat -o /dev/stdout -e 'syscalls:sys_enter_*' ${OPT_COMMAND} | awk '
+         $1 && $2 ~ /syscalls:/ {
+         sub("syscalls:sys_enter_", ""); sub(":", "")
+         gsub(",", "")
+         printf "%s ",$2 }'`
+
+    echo "{"
+    echo "    \"defaultAction\": \"${DOCKER_ACTION}\","
+    echo "    \"architectures\": ["
+    echo "        \"SCMP_ARCH_X86_64\","
+    echo "        \"SCMP_ARCH_X86\","
+    echo "        \"SCMP_ARCH_X32\""
+    echo "    ],"
+    echo "    \"syscalls\": ["
+    
+    for sysc in ${SYSCALLS}; do
+        echo "        {"
+        echo "            \"name\": \"${sysc}\","
+        echo "            \"action\": \"SCMP_ACT_ALLOW\","
+        echo "            \"args\": \"[]\""
+        echo "        },"
+    done
+    echo "    ]"
+    echo "}"
+fi
