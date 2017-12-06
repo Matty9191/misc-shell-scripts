@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Program: VxVM Status <vxvmstatus.sh>
+#
+# Author: Matty < matty91 at gmail dot com >
+#
+# Current Version: 1.0
+#
+# Revision History:
+#
+# Version 1.0
+#     Original release
+#
+# Last Updated: 04-13-2001
+
+EMAIL="admin@prefetch.net"
+STATUS=0
+VXPRINT="/usr/sbin/vxprint"
+VXDISK="/usr/sbin/vxdisk"
+EGREP="/usr/bin/egrep -i"
+MAIL="/usr/bin/mailx"
+
+# Check if various utilities are installed
+if [ ! -f ${VXPRINT} ] || [ ! -f ${VXDISK} ] || [ ! -f ${EGREP ]; then
+	echo "Cannot find one or more required utilities"
+	exit 0
+fi
+
+# Check for Disabled or detached plexes/volumes/subdisks
+if ${VXPRINT} -ht | ${EGREP} '([D]ISABLED|[D]ETACHED)' > /dev/null; then
+        echo "Veritas Volumes are either disabled or detached"
+
+	if [ -f ${MAIL} ]; then	
+		${VXPRINT} -ht | ${MAIL} -s "Plex/Volume Failure Detected" ${EMAIL}
+	fi
+
+	STATUS=1
+fi
+
+# Check for Failing disks
+if  ${VXDISK} list | ${EGREP} [F]AIL > /dev/null; then
+        echo "Veritas Disk Failing\n"
+
+        if [ -f ${MAIL} ]; then    
+                ${VXPRINT} -ht | ${MAIL} -s "Device Failure detected" ${EMAIL}
+        fi
+
+	STATUS=1
+fi
+
+exit ${STATUS}
