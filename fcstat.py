@@ -142,7 +142,7 @@ def main():
         for hba in getHBAList():
             printHBAstats(hba, stats)
             initStatistics(hba, stats)
-        print("\n")
+        print("")
         time.sleep(1)
 
 
