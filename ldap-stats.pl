@@ -1028,7 +1028,7 @@ $printstr .= $operations{MODRDN}{DATA}   ? $operations{MODRDN}{SPACING}   : q{};
 $printstr .= $operations{DEL}{DATA}      ? $operations{DEL}{SPACING}      : q{};
 print "$printstr\n";
 
-for my $index qw( Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec) {
+for my $index (qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)) {
     if ( defined $months{$index} || $printmonths ) {
         printf '  %-11s', $index;
         if ( $operations{CONNECT}{DATA} ) {
