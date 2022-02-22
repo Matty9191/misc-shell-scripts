@@ -5,10 +5,18 @@
 # Source code home: http://prefetch.net/code/ldap-stats.pl
 #
 # Author: Matty < matty91 @ gmail dot com >
+# Author: LDAP Tool Box project
+# Author: David Coutadeur <david.coutadeur@gmail.com>
 #
-# Current Version: 5.2
+# Current Version: 7
 #
 # Revision History:
+#
+#  Version 7
+#  - add option (--log26) for new openldap 2.6 log format compatibility (#27)
+#
+#  Version 6
+#  - Choose syslog date format
 #
 #  Version 5.2
 #  Perl::Tidy and Perl::Critic -- Gavin Henry, Suretec Systems Ltd.
@@ -107,10 +115,10 @@
 #  Version 1.0
 #   Original release
 #
-# Last Updated: 13-11-2006
+# Last Updated: 21-02-2022
 #
 # Purpose:
-#   Produces numerous reports from OpenLDAP 2.1, 2.2 and 2.3 logfiles.
+#   Produces numerous reports from OpenLDAP 2.1, 2.2, 2.3, 2.4, 2.5 and 2.6 logfiles.
 #
 # License:
 #
@@ -157,7 +165,9 @@ sub usage {
       . "                          Valid operations are: CONNECT, FAILURES, BIND, UNBIND,\n"
       . "                          SRCH, CMP, ADD, MOD, MODRDN, DEL\n"
       . "                          Predefined reports are: ALL, READ, WRITE\n"
-      . "   -s                     Split attributes found used in searches\n";
+      . "   -s                     Split attributes found used in searches\n"
+      . "   -D                     Use RFC5424 date format\n"
+      . "   --log26                Use OpenLDAP 2.6 log format\n";
     return;
 }
 
@@ -183,6 +193,12 @@ my $printmonths = 0;
 # Print all days
 my $printdays = 0;
 
+# Use RFC5242 date format
+my $dateformat = 0;
+
+# Use OpenLDAP 2.6 log format
+my $log26 = 0;
+
 ###################################
 #### Get some options from the user
 ###################################
@@ -191,12 +207,14 @@ my $printdays = 0;
 GetOptions(
     'count|c=i'      => \$count,
     'days|d'         => \$printdays,
+    'dateformat|D'   => \$dateformat,
     'help|h'         => \$help,
     'length|l=i'     => \$increment,
     'months|m'       => \$printmonths,
     'network|n'      => \$resolvename,
     'operations|o=s' => \@operations,
-    'split|s'        => \$splitattrs
+    'split|s'        => \$splitattrs,
+    'log26'          => \$log26,
 );
 
 ### print a nice usage message
@@ -315,6 +333,83 @@ $operations{DEL} = {
     FIELD   => '%4s',
 };
 
+my $dateregexp_full;
+my $dateregexp_split;
+
+# RFC 5424 format
+if ($dateformat) {
+    $dateregexp_full  = '(\d+-\d+-\d+T\d+:\d+:\d+\.\d+\+\d+:\d+)';
+    $dateregexp_split = '\d+-(\d+)-(\d+)T(\d+):(\d+):(\d+)\.\d+\+\d+:\d+';
+}
+# standard OpenLDAP 2.4/2.5 log format
+else {
+    $dateregexp_full  = '(\w+\s+\d+\s+\d+:\d+:\d+)';
+    $dateregexp_split = '(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)';
+}
+# standard 2.6 log format
+if($log26) {
+    $dateregexp_full  = '([0-9a-h]{8}\.[0-9a-h]{8})';
+    $dateregexp_split = '([0-9a-h]{8})\.([0-9a-h]{8})';
+}
+
+# Function extracting month, day and hour from given log line
+sub getTimeComponents
+{
+    my $line = shift;
+    my ( $month, $day, $hour ) = ( "undef", "undef", "undef" );
+    if( $log26 )
+    {
+        if( $line =~ /^$dateregexp_split.*$/m )
+        {
+            # compute time components
+            my $ts = hex("0x".$1); # number of second since epoch
+            my $tn = hex("0x".$2); # number of nanoseconds
+            my $completedate = scalar localtime $ts;
+            ( $month, $day, $hour ) = $completedate =~ /^\w+\s+(\w+)\s+(\d+)\s+(\d+):/m;
+        }
+    }
+    else
+    {
+        if( $line =~ /^$dateregexp_split.*$/m )
+        {
+            # return direct matched time components
+            ( $month, $day, $hour ) = ( $1, $2, $3 );
+        }
+    }
+
+    return ( $month, $day, $hour );
+}
+
+# Function extracting full date from given log line
+sub getFullDate
+{
+    my $line = shift;
+    my ( $month, $day, $hour, $min, $sec );
+    my $fulldate = "";
+
+    if( $log26 )
+    {
+        if ( $line =~ /^$dateregexp_split/m ) {
+            # compute time components
+            my $ts = hex("0x".$1); # number of second since epoch
+            my $tn = hex("0x".$2); # number of nanoseconds
+            my $completedate = scalar localtime $ts;
+            ( $month, $day, $hour, $min, $sec ) =
+                $completedate =~ /^\w+\s+(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+)/m;
+
+            $fulldate = "$month $day $hour:$min:$sec.".$tn;
+        }
+    }
+    else
+    {
+        if ( $line =~ /^$dateregexp_full/m ) {
+            $fulldate = $1;
+        }
+    }
+    return $fulldate;
+}
+
+
 ###################################################
 ### Open the logfile and process all of the entries
 ###################################################
@@ -359,12 +454,14 @@ for my $file (@ARGV) {
 
     while ( my $line = <LOGFILE> ) {
 
+        my $fulldate = getFullDate($line);
+
         ### check start and end dates
-        if ( $line =~ /^(\w+\s+\d+\s+\d+:\d+:\d+)/mx ) {
+        if ( $line =~ /^$dateregexp_full/mx ) {
             if ( !$logarray{$logfile}{SDATE} ) {
-                $logarray{$logfile}{SDATE} = $1;
+                $logarray{$logfile}{SDATE} = $fulldate;
             }
-            $logarray{$logfile}{EDATE} = $1;
+            $logarray{$logfile}{EDATE} = $fulldate;
         }
 
         ### Check to see if we have processed $lines lines
@@ -373,15 +470,14 @@ for my $file (@ARGV) {
             $lines += $increment;
         }
 
+        my ( $month, $day, $hour ) = getTimeComponents($line);
+
         ### Check for a new connection
         if ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):(\d+):(\d+).*conn=(\d+) [ ] fd=\d+ [ ] (?:ACCEPT|connection) [ ] from/mx
-          )
+/conn=(\d+) [ ] fd=\d+ [ ] (?:ACCEPT|connection) [ ] from/mx
+           )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $6;
+            my $conn  = $1;
             my $host;
 
             if ( $line =~ /IP=(\d+\.\d+\.\d+\.\d+):/mx ) {
@@ -483,13 +579,10 @@ for my $file (@ARGV) {
             ### Check for anonymous binds
         }
         elsif ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+)  [ ] op=\d+ [ ] BIND [ ] dn="" [ ] method=128/mx
+/conn=(\d+)  [ ] op=\d+ [ ] BIND [ ] dn="" [ ] method=128/mx
           )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $4;
+            my $conn  = $1;
 
             ### Increment the counters
             if (   defined $conns{$conn}
@@ -508,14 +601,11 @@ for my $file (@ARGV) {
             ### Check for non-anonymous binds
         }
         elsif ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+) [ ] op=\d+ [ ] BIND [ ] dn="([^"]+)" [ ] mech=/mx
+/conn=(\d+) [ ] op=\d+ [ ] BIND [ ] dn="([^"]+)" [ ] mech=/mx
           )
         {
-            my $month  = $1;
-            my $day    = $2;
-            my $hour   = $3;
-            my $conn   = $4;
-            my $binddn = lc $5;
+            my $conn   = $1;
+            my $binddn = lc $2;
 
             ### Increment the counters
             if (   defined $conns{$conn}
@@ -566,13 +656,10 @@ for my $file (@ARGV) {
             ### Check for SEARCHES
         }
         elsif ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+) [ ] op=\d+ [ ] SEARCH [ ] RESULT/mx
+            /conn=(\d+) [ ] op=\d+ [ ] SEARCH [ ] RESULT/mx
           )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $4;
+            my $conn  = $1;
 
             ### Increment the counters
             if (   defined $conns{$conn}
@@ -587,14 +674,10 @@ for my $file (@ARGV) {
 
             ### Check for unbinds
         }
-        elsif ( $line =~
-            /^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+) [ ] op=\d+ [ ] UNBIND/mx
-          )
+        elsif (
+            $line =~ /conn=(\d+) [ ] op=\d+ [ ] UNBIND/mx )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $4;
+            my $conn  = $1;
 
             ### Increment the counters
             if (   defined $conns{$conn}
@@ -611,13 +694,10 @@ for my $file (@ARGV) {
             ### TODO: Add other err=X values from contrib/ldapc++/src/LDAPResult.h
         }
         elsif ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+) [ ] op=\d+(?: SEARCH)? [ ] RESULT [ ]/mx
+/conn=(\d+) [ ] op=\d+(?: SEARCH)? [ ] RESULT [ ]/mx
           )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $4;
+            my $conn  = $1;
 
             if ( $line =~ /\berr=49\b/mx ) {
                 ### Increment the counters
@@ -635,14 +715,11 @@ for my $file (@ARGV) {
             ### Check for entry changes: add, modify modrdn, delete
         }
         elsif ( $line =~
-/^(\w+)\s+(\d+)\s+(\d+):\d+:\d+.*conn=(\d+) [ ] op=\d+ [ ] (ADD|CMP|MOD|MODRDN|DEL) [ ] dn=/mx
+/conn=(\d+) [ ] op=\d+ [ ] (ADD|CMP|MOD|MODRDN|DEL) [ ] dn=/mx
           )
         {
-            my $month = $1;
-            my $day   = $2;
-            my $hour  = $3;
-            my $conn  = $4;
-            my $type  = $5;
+            my $conn  = $1;
+            my $type  = $2;
 
             ### Increment the counters
             if (   defined $conns{$conn}
@@ -693,8 +770,12 @@ for my $logfile ( sort keys %logarray ) {
 #######################################
 
 my $total_operations =
-  $stats{TOTAL_BIND} + $stats{TOTAL_UNBIND} + $stats{TOTAL_SRCH} +
-  $stats{TOTAL_MOD} + $stats{TOTAL_ADD} + $stats{TOTAL_MODRDN} +
+  $stats{TOTAL_BIND} +
+  $stats{TOTAL_UNBIND} +
+  $stats{TOTAL_SRCH} +
+  $stats{TOTAL_MOD} +
+  $stats{TOTAL_ADD} +
+  $stats{TOTAL_MODRDN} +
   $stats{TOTAL_DEL};
 
 print "\n\n" . "Operation totals\n" . "----------------\n";
@@ -730,7 +811,7 @@ for my $selected (@operations) {
         MOD      => sub { $operations{MOD}{DATA}      = 1 },
         MODRDN   => sub { $operations{MODRDN}{DATA}   = 1 },
         DEL      => sub { $operations{DEL}{DATA}      = 1 },
-        ALL => sub {
+        ALL      => sub {
             $operations{CONNECT}{DATA}  = 1;
             $operations{FAILURES}{DATA} = 1;
             $operations{BIND}{DATA}     = 1;
@@ -1028,7 +1109,15 @@ $printstr .= $operations{MODRDN}{DATA}   ? $operations{MODRDN}{SPACING}   : q{};
 $printstr .= $operations{DEL}{DATA}      ? $operations{DEL}{SPACING}      : q{};
 print "$printstr\n";
 
-for my $index qw( Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec) {
+my $month_table;
+if ($dateformat) {
+    $month_table = [qw(01 02 03 04 05 06 07 08 09 10 11 12)];
+}
+else {
+    $month_table = [qw(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)];
+}
+
+for my $index (@$month_table) {
     if ( defined $months{$index} || $printmonths ) {
         printf '  %-11s', $index;
         if ( $operations{CONNECT}{DATA} ) {
